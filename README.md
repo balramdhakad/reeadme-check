@@ -42,10 +42,10 @@ The API server and the background worker run as two independent processes agains
                           └──────────────────────┘              └──────────────────────┘
 ```
 
-- **API process (`src/server.ts`)** — terminates HTTP/Socket.IO, validates input (Zod), enforces RBAC, writes to Postgres, enqueues jobs, and broadcasts WS events.
-- **Worker process (`src/worker.ts`)** — runs all BullMQ workers (mail, audit, route optimize, tracking flush/retry/stuck-scan, notification dispatch). Exposes its own `/livez` and `/readyz` HTTP endpoints on `WORKER_HEALTH_PORT` (default 8081). Workers can also emit Socket.IO events through the shared Redis adapter.
-- **Postgres + PostGIS** — holds all canonical state. Spatial columns (`geometry(Point,4326)`, `geometry(Polygon,4326)`) with GIST indexes power proximity queries and geofence containment via `ST_Contains`.
-- **Redis** — plays four roles: BullMQ queues (`fleet-tracking:bull` prefix), Socket.IO adapter for cross-process broadcast, hot caches (latest vehicle ping, active driver→vehicle, active route per vehicle, geofence membership), and rate-limit counters.
+- **API process (`src/server.ts`)** - terminates HTTP/Socket.IO, validates input (Zod), enforces RBAC, writes to Postgres, enqueues jobs, and broadcasts WS events.
+- **Worker process (`src/worker.ts`)** - runs all BullMQ workers (mail, audit, route optimize, tracking flush/retry/stuck-scan, notification dispatch). Exposes its own `/livez` and `/readyz` HTTP endpoints on `WORKER_HEALTH_PORT` (default 8081). Workers can also emit Socket.IO events through the shared Redis adapter.
+- **Postgres + PostGIS** - holds all canonical state. Spatial columns (`geometry(Point,4326)`, `geometry(Polygon,4326)`) with GIST indexes power proximity queries and geofence containment via `ST_Contains`.
+- **Redis** - plays four roles: BullMQ queues (`fleet-tracking:bull` prefix), Socket.IO adapter for cross-process broadcast, hot caches (latest vehicle ping, active driver→vehicle, active route per vehicle, geofence membership), and rate-limit counters.
 
 Process boundaries are intentional: scaling the API horizontally is independent of scaling the worker pool, and a slow Mapbox call cannot stall the HTTP request path.
 
@@ -60,7 +60,7 @@ docker compose up -d postgres redis
 # 2. Install deps
 pnpm install
 
-# 3. Configure — copy the template and fill in secrets
+# 3. Configure - copy the template and fill in secrets
 cp .env.example .env
 
 # 4. Apply schema migrations
@@ -102,46 +102,46 @@ pnpm db:studio     # drizzle-kit: visual table explorer
 
 API health endpoints:
 
-- `GET /readyz` — DB + Redis ping, 200/503
-- `GET /health` — 307 → `/readyz`
+- `GET /readyz` - DB + Redis ping, 200/503
+- `GET /health` - 307 → `/readyz`
 
 Worker health endpoints (on `WORKER_HEALTH_PORT`):
 
-- `GET /livez` — process is alive
-- `GET /readyz` — DB + Redis + each BullMQ worker `isRunning()` + shutdown flag
+- `GET /livez` - process is alive
+- `GET /readyz` - DB + Redis + each BullMQ worker `isRunning()` + shutdown flag
 
 ## Domain model
 
 Schemas live under [`src/db/schema/`](src/db/schema). The hot relationships:
 
-- **users** — (`admin | manager | driver`) → optional **driver_profiles** (1:1 for drivers)
-- **vehicles** — (`idle | on_trip | maintenance`)
-- **driver_vehicle_assignments** — driver↔vehicle pair with lifecycle:
+- **users** - (`admin | manager | driver`) → optional **driver_profiles** (1:1 for drivers)
+- **vehicles** - (`idle | on_trip | maintenance`)
+- **driver_vehicle_assignments** - driver↔vehicle pair with lifecycle:
   - `unassigned` = pair exists, not currently driving
   - `assigned` = pair is on a live `in_progress` route
   - `ended` = archived
   - At most one _live_ (`assigned`/`unassigned`) row per driver and per vehicle (enforced by partial unique indexes)
-- **routes** — trips between two hubs. Owned by an assignment (nullable initially). Stores origin/destination snapshots (address + PostGIS point) plus Mapbox-computed polyline / distance / duration / waypoints / provider.
-- **shipments** — (`created | assigned | in_transit | delivered | cancelled`). Carry `origin_pincode`, `dest_pincode`, a frozen `planned_path` JSONB (hub-by-hub itinerary), `shipment_eta` + `baseline_shipment_eta` (delay-tolerant ETA math), `current_leg_idx`, `delay_window_seconds`, `cumulative_delay_seconds`. Point to a route for the current leg.
-- **shipment_status_history** — append-only audit of every status transition.
-- **shipment_hub_events** — granular timeline of hub-level events (`arrived_at_hub`, `departed_hub`, `picked_up_from_origin`, `delivered_at_destination`, etc.) per shipment leg.
-- **hubs** — distribution centres with code, name, representative pincode, PostGIS point, `primary | secondary` kind, soft-deletable.
-- **pincodes_master** — India-Post-sourced master table (~155 K rows). Immutable reference.
-- **hub_district_mappings** — ops layer: "Hub-Pune serves all pincodes whose district = Pune." Triggers `hub.pincodes.rematerialize` to repopulate the next table.
-- **hub_serviceable_pincodes** — materialised mapping (`hubId × pincode`) of which hub services which pincode. `district` (rematerialized) and `manual` (admin-curated) sources; manual rows survive rebuilds.
-- **hub_connections** — directional edges in the hub graph with `distance_km`, `typical_duration_s`, `cost_inr`, `is_active`, `manual_override`. Auto-built via Mapbox Matrix; manual rows survive rebuilds.
-- **pincode_routes** — cached pre-computed Dijkstra paths keyed by hub representative pincodes (`from_pincode × to_pincode`). `manual` (admin preset) and `computed` sources.
-- **vehicle_current_location** — last GPS fix per vehicle (unique on `vehicle_id`).
-- **vehicle_location_history** — append-only history with a partial unique index on `(vehicle_id, client_id)` so offline batches stay idempotent.
-- **geofences** / **geofence_events** — PostGIS Polygons + enter/exit log (geofences soft-deletable).
-- **fuel_logs** — per-vehicle fills with cost/litres/odometer.
-- **maintenance_schedules** — vehicle service plans (`due_at` and/or `due_odometer_km`).
-- **notifications** + **notifications_reads** — fanned out per user OR per role; reads are recorded per user, so multiple recipients of a role-targeted notification each get their own read state.
-- **report_files** — pointers to generated CSV/PDF reports (in Cloudinary or local FS) with a 7-day TTL.
-- **refresh_tokens** — opaque hashed refresh tokens with a family ID for reuse-attack detection.
-- **audit_log** — global audit trail written async via the audit worker.
+- **routes** - trips between two hubs. Owned by an assignment (nullable initially). Stores origin/destination snapshots (address + PostGIS point) plus Mapbox-computed polyline / distance / duration / waypoints / provider.
+- **shipments** - (`created | assigned | in_transit | delivered | cancelled`). Carry `origin_pincode`, `dest_pincode`, a frozen `planned_path` JSONB (hub-by-hub itinerary), `shipment_eta` + `baseline_shipment_eta` (delay-tolerant ETA math), `current_leg_idx`, `delay_window_seconds`, `cumulative_delay_seconds`. Point to a route for the current leg.
+- **shipment_status_history** - append-only audit of every status transition.
+- **shipment_hub_events** - granular timeline of hub-level events (`arrived_at_hub`, `departed_hub`, `picked_up_from_origin`, `delivered_at_destination`, etc.) per shipment leg.
+- **hubs** - distribution centres with code, name, representative pincode, PostGIS point, `primary | secondary` kind, soft-deletable.
+- **pincodes_master** - India-Post-sourced master table (~155 K rows). Immutable reference.
+- **hub_district_mappings** - ops layer: "Hub-Pune serves all pincodes whose district = Pune." Triggers `hub.pincodes.rematerialize` to repopulate the next table.
+- **hub_serviceable_pincodes** - materialised mapping (`hubId × pincode`) of which hub services which pincode. `district` (rematerialized) and `manual` (admin-curated) sources; manual rows survive rebuilds.
+- **hub_connections** - directional edges in the hub graph with `distance_km`, `typical_duration_s`, `cost_inr`, `is_active`, `manual_override`. Auto-built via Mapbox Matrix; manual rows survive rebuilds.
+- **pincode_routes** - cached pre-computed Dijkstra paths keyed by hub representative pincodes (`from_pincode × to_pincode`). `manual` (admin preset) and `computed` sources.
+- **vehicle_current_location** - last GPS fix per vehicle (unique on `vehicle_id`).
+- **vehicle_location_history** - append-only history with a partial unique index on `(vehicle_id, client_id)` so offline batches stay idempotent.
+- **geofences** / **geofence_events** - PostGIS Polygons + enter/exit log (geofences soft-deletable).
+- **fuel_logs** - per-vehicle fills with cost/litres/odometer.
+- **maintenance_schedules** - vehicle service plans (`due_at` and/or `due_odometer_km`).
+- **notifications** + **notifications_reads** - fanned out per user OR per role; reads are recorded per user, so multiple recipients of a role-targeted notification each get their own read state.
+- **report_files** - pointers to generated CSV/PDF reports (in Cloudinary or local FS) with a 7-day TTL.
+- **refresh_tokens** - opaque hashed refresh tokens with a family ID for reuse-attack detection.
+- **audit_log** - global audit trail written async via the audit worker.
 
-UUIDs are generated server-side via `uuidv7()` (Postgres extension), so they sort by creation time — handy for keyset paging if you switch off `OFFSET`.
+UUIDs are generated server-side via `uuidv7()` (Postgres extension), so they sort by creation time - handy for keyset paging if you switch off `OFFSET`.
 
 ## API surface
 
@@ -227,7 +227,7 @@ The Redis adapter (`@socket.io/redis-adapter`) means the worker process can also
 
 ## Background jobs (BullMQ)
 
-Each queue has its own dedicated `ioredis` connection (per BullMQ's hard requirement that workers and queues use separate connections — see [`src/jobs/connection.ts`](src/jobs/connection.ts)). All queues share the prefix `fleet-tracking:bull`.
+Each queue has its own dedicated `ioredis` connection (per BullMQ's hard requirement that workers and queues use separate connections - see [`src/jobs/connection.ts`](src/jobs/connection.ts)). All queues share the prefix `fleet-tracking:bull`.
 
 | Queue / job name              | Concurrency                          | Retries     | Used for                                                                                                                                  |
 | ----------------------------- | ------------------------------------ | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
@@ -271,6 +271,40 @@ The tracking pipeline is the most performance-sensitive path; here is what actua
 5. If the Lua script returned a flush snapshot, the API enqueues `tracking.flush` with the pings. The worker calls `applyPingsToVehicle("live")`, which inserts history rows and upserts `vehicle_current_location` _only if_ `recordedAt > current.recordedAt` (preserves monotonicity under concurrency).
 6. The API also (non-blocking) emits `location:update`, runs geofence detection, and runs off-route detection. The latter, on a violation, debounces re-optimize enqueues via `route_off-route_debounce_{routeId}`.
 
+### Request flow & latency
+
+The hot path never touches the DB — it does **three Redis round-trips** and returns. The heavy work (history writes, geofence math, route re-optimize) is pushed off the request: either to a BullMQ worker or to fire-and-forget tasks. That is what keeps the per-ping response at **~20–30 ms**.
+
+```
+POST /api/v1/tracking   (driver)
+   │
+   ▼
+═══ SYNCHRONOUS PATH ════════════════════════════ awaited · ~20–30 ms ═══
+   1  auth(["driver"]) · burst 5/s · sustained 5/10s · Zod validate
+   2  resolve vehicleId
+        Redis GET fleet:driver-active-vehicle:{driverId}        ← cache
+          └ miss → Postgres lookup → re-prime cache (fire & forget)
+   3  anomaly check
+        Redis GET veh:{id}:last (+ :ts) → turf distance / Δt
+          vs ANOMALY_TELEPORT_M_PER_S  →  drop | flag
+   4  INGEST_LUA   (1 atomic Redis round-trip)
+        SET :last/:ts (if clean & newer) · RPUSH :buffer · LTRIM cap · INCR :counter
+          └ counter == FLUSH_THRESHOLD → return buffer snapshot + DEL
+   5  if flushed → enqueue tracking.flush   (BullMQ — returns instantly)
+   │
+   ▼   ✅ HTTP response returns here
+   │
+═══ FIRE-AND-FORGET ═══════════════════════════ void … .catch · not awaited ═══
+   •  emit Socket.IO  location:update → room vehicle:{id}
+   •  geofence enter/exit detection
+   •  off-route check → debounced route.optimize enqueue
+
+═══ WORKER  (async, off the request path) ══════════════════════════════
+   tracking.flush → applyPingsToVehicle("live")
+        → INSERT vehicle_location_history   (batch of FLUSH_THRESHOLD)
+        → UPSERT vehicle_current_location   (only if recordedAt newer)
+```
+
 Offline batch (`POST /api/v1/tracking/retry`) takes up to 240 strictly-monotonic pings per request (each with a UUID `clientId`), groups them by the historic assignment window each ping fell into (using `findDriverAssignmentsOverlappingWindow`), and enqueues `tracking.retry_flush` per-vehicle. Writes use `ON CONFLICT (vehicle_id, client_id) DO NOTHING` so reuploading is idempotent.
 
 The hourly `tracking.stuck-scan` job exists for crash recovery: if the API enqueued pings into the Redis buffer but BullMQ ate the flush job (or the worker was OOM-killed mid-batch), the next scan picks up the stale buffer and flushes it directly to the DB.
@@ -285,29 +319,67 @@ Three layers cooperate to figure out where a parcel goes:
 
 Routes themselves are now strictly **hub-to-hub trips**. The `POST /routes` body accepts a hub UUID or hub code as a plain string for origin/destination/waypoints; the service resolves to the hubs table and snapshots `address` / `lat` / `lng` onto the route row so the polyline stays stable even if a hub is later moved.
 
+### The hub graph (edges & vertices)
+
+The planner models the network as a **directed weighted graph**:
+
+- **Vertices** = rows in `hubs` (each hub is a node).
+- **Edges** = rows in `hub_connections` — directed `from_hub → to_hub`, with `distance_km`, `typical_duration_s`, and `cost_inr`.
+- **Edge weight** = `typical_duration_s` (the planner optimizes for time, not distance).
+- Edges are auto-built by the `hub.connections.rebuild` job calling the **Mapbox Matrix** API (≤ 25 coords/call); `manual_override` edges survive rebuilds.
+
+```
+  vertices = hubs        edges = hub_connections (directed, weight = typical_duration_s)
+
+        ┌───────────┐   1200s    ┌────────────┐    900s
+        │ A · Mumbai│ ─────────▶ │ B · Nashik │ ─────────┐
+        └─────┬─────┘            └────────────┘          │
+              │ 1500s                                     ▼
+              ▼                                    ┌────────────┐
+        ┌───────────┐         1100s                │ D · Delhi  │
+        │ C · Surat │ ───────────────────────────▶ └────────────┘
+        └───────────┘
+```
+
+**How a path is calculated** (at shipment creation, `from_pincode → to_pincode`):
+
+1. Resolve each pincode to its serving hub via `hub_serviceable_pincodes`.
+2. **Cache hit?** Look up `pincode_routes (from_pincode × to_pincode)` — if a `manual` or `computed` path exists, use it and stop.
+3. **Cache miss → Dijkstra**: run shortest-path (binary min-heap) over the hub graph. The adjacency map is built from `hub_connections` and cached in Redis for 5 min, so repeated planning doesn't re-read the table.
+4. **Upsert** the resulting hub-by-hub path into `pincode_routes` so the next identical shipment is a cache hit.
+
+For the graph above, planning **A → D** compares:
+
+```
+  A → B → D = 1200 + 900  = 2100s   ✅ chosen (lowest typical_duration_s)
+  A → C → D = 1500 + 1100 = 2600s
+```
+
+The chosen path becomes the shipment's frozen `planned_path` (hub-by-hub itinerary); each leg then gets its own Mapbox Directions polyline via a `route.optimize` job.
+
 ## Security model
 
-- **Passwords** — bcrypt (cost factor 12). A constant-time dummy hash is compared when a user lookup misses, so login timing doesn't leak whether the email exists.
-- **Shipment codes** — generated via Node's `crypto.randomInt` over a 32-char unambiguous alphabet (no I/O/0/1) — no `Math.random` birthday-paradox collisions on the `uq_shipments_code` unique index.
-- **JWT** — HS256, issuer-bound (`logistics-fleet-tracking`), separate secrets for access/refresh, both required ≥ 32 chars at boot.
-- **Refresh tokens** — stored as a SHA-256 hash with a per-session family ID. Reuse detection is hard-coded: any second use of a known JTI revokes the entire family and logs `event=TOKEN_REUSE_ATTACK severity=HIGH`.
-- **Cookies** — `httpOnly`, `secure` in production, `SameSite=Strict` in production (`Lax` in dev), scoped to `/api/v1/auth`.
-- **CORS** — explicit allow-list via `CORS_ORIGINS`, credentials enabled.
-- **Helmet** — default suite, `x-powered-by` disabled, `trust proxy = 1` (one hop assumed; if you put N hops in front, adjust).
-- **Rate limiting** ([`src/middleware/rateLimit.ts`](src/middleware/rateLimit.ts)) — global 200/15min by IP, login 5/15min by email-or-IP, register 30/h by actor, OTP `1/min` + `5/h` by email-or-IP, change-password 5/h by user, tracking burst/sustained by driver, retry-batch 20/min by driver. Redis-backed when `NODE_ENV != test`.
-- **OTP** — 6-digit, SHA-256 hashed in Redis (5 min TTL), max 3 wrong attempts, timing-safe comparison.
-- **Audit log** — every privileged mutation calls `audit("entity.action", target, before, after, ctx)`; correlation IDs are propagated end-to-end.
-- **Validation** — every route gates inputs with `validate()`; `strictObject` rejects unknown keys; assigned `req.body / params / valid` are post-coercion.
-- **PII redaction** — Winston format strips `password`, `token`, `accesstoken`, `refreshtoken`, `authorization`, `cookie`, `secret`, `apikey`, `key`, `tokenhash`, `passwordhash` keys before serialization (case-insensitive).
-- **Body limits** — JSON and urlencoded both capped at 256 KB.
+- **Passwords** - bcrypt (cost factor 12). A constant-time dummy hash is compared when a user lookup misses, so login timing doesn't leak whether the email exists.
+- **Shipment codes** - generated via Node's `crypto.randomInt` over a 32-char unambiguous alphabet (no I/O/0/1) - no `Math.random` birthday-paradox collisions on the `uq_shipments_code` unique index.
+- **JWT** - HS256, issuer-bound (`logistics-fleet-tracking`), separate secrets for access/refresh, both required ≥ 32 chars at boot.
+- **Refresh tokens** - stored as a SHA-256 hash with a per-session family ID. Reuse detection is hard-coded: any second use of a known JTI revokes the entire family and logs `event=TOKEN_REUSE_ATTACK severity=HIGH`.
+- **Cookies** - `httpOnly`, `secure` in production, `SameSite=Strict` in production (`Lax` in dev), scoped to `/api/v1/auth`.
+- **CORS** - explicit allow-list via `CORS_ORIGINS`, credentials enabled.
+- **Helmet** - default suite, `x-powered-by` disabled, `trust proxy = 1` (one hop assumed; if you put N hops in front, adjust).
+- **Rate limiting** ([`src/middleware/rateLimit.ts`](src/middleware/rateLimit.ts)) - global 200/15min by IP, login 5/15min by email-or-IP, register 30/h by actor, OTP `1/min` + `5/h` by email-or-IP, change-password 5/h by user, tracking burst/sustained by driver, retry-batch 20/min by driver. Redis-backed when `NODE_ENV != test`.
+- **OTP** - 6-digit, SHA-256 hashed in Redis (5 min TTL), max 3 wrong attempts, timing-safe comparison.
+- **Audit log** - every privileged mutation calls `audit("entity.action", target, before, after, ctx)`; correlation IDs are propagated end-to-end.
+- **Validation** - every route gates inputs with `validate()`; `strictObject` rejects unknown keys; assigned `req.body / params / valid` are post-coercion.
+- **PII redaction** - Winston format strips `password`, `token`, `accesstoken`, `refreshtoken`, `authorization`, `cookie`, `secret`, `apikey`, `key`, `tokenhash`, `passwordhash` keys before serialization (case-insensitive).
+- **Body limits** - JSON and urlencoded both capped at 256 KB.
 
 ## Operational notes
 
-- **Graceful shutdown** — implemented for both processes (SIGTERM, SIGINT, uncaughtException, unhandledRejection). The worker stops accepting new HTTP traffic, waits for in-flight jobs (lockDuration 60s on the tracking flush worker), then closes Redis and DB pools.
-  - **Correlation IDs** — take `x-correlation-id` from incoming requests if it matches `^[A-Za-z0-9_-]{1,64}$`, otherwise generate a UUID. Propagated to logs, audit rows, and job envelopes.
-- **Logging** — Winston JSON in production, colourized in dev. Every request emits one structured line on `finish` with method, URL, status, duration, correlation ID, and user ID.
-- **Health** — `/readyz` returns 503 when DB or Redis is down; wire this into your load balancer and your Kubernetes readiness probe.
-- **Worker readiness** — a worker is "ready" only when DB + Redis are reachable AND every individual BullMQ worker `isRunning()`. During shutdown the same endpoint returns 503 with `shuttingDown:true`, so a rolling restart drains traffic cleanly.
+- **Graceful shutdown** - implemented for both processes (SIGTERM, SIGINT, uncaughtException, unhandledRejection). The worker stops accepting new HTTP traffic, waits for in-flight jobs (lockDuration 60s on the tracking flush worker), then closes Redis and DB pools.
+- **Correlation IDs** - take `x-correlation-id` from incoming requests if it matches `^[A-Za-z0-9_-]{1,64}$`, otherwise generate a UUID. Propagated to logs, audit rows, and job envelopes.
+- **Logging** - Winston JSON in production, colourized in dev. Every request emits one structured line on `finish` with method, URL, status, duration, correlation ID, and user ID.
+- **Health** - `/readyz` returns 503 when DB or Redis is down; wire this into your load balancer and your Kubernetes readiness probe.
+- **Worker readiness** - a worker is "ready" only when DB + Redis are reachable AND every individual BullMQ worker `isRunning()`. During shutdown the same endpoint returns 503 with `shuttingDown:true`, so a rolling restart drains traffic cleanly.
 
 ## Project layout
 
