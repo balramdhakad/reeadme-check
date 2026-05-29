@@ -276,33 +276,42 @@ The tracking pipeline is the most performance-sensitive path; here is what actua
 The hot path never touches the DB — it does **three Redis round-trips** and returns. The heavy work (history writes, geofence math, route re-optimize) is pushed off the request: either to a BullMQ worker or to fire-and-forget tasks. That is what keeps the per-ping response at **~20–30 ms**.
 
 ```
-POST /api/v1/tracking   (driver)
+   POST /api/v1/tracking                                     driver GPS ping
    │
    ▼
-═══ SYNCHRONOUS PATH ════════════════════════════ awaited · ~20–30 ms ═══
-   1  auth(["driver"]) · burst 5/s · sustained 5/10s · Zod validate
-   2  resolve vehicleId
-        Redis GET fleet:driver-active-vehicle:{driverId}        ← cache
-          └ miss → Postgres lookup → re-prime cache (fire & forget)
-   3  anomaly check
-        Redis GET veh:{id}:last (+ :ts) → turf distance / Δt
-          vs ANOMALY_TELEPORT_M_PER_S  →  drop | flag
-   4  INGEST_LUA   (1 atomic Redis round-trip)
-        SET :last/:ts (if clean & newer) · RPUSH :buffer · LTRIM cap · INCR :counter
-          └ counter == FLUSH_THRESHOLD → return buffer snapshot + DEL
-   5  if flushed → enqueue tracking.flush   (BullMQ — returns instantly)
+━━━ ① SYNCHRONOUS ━━━━━━━━━━━━━━━━━━ awaited · 3 Redis hops · ~20–30 ms ━━━
    │
-   ▼   ✅ HTTP response returns here
+   ├─▶ auth(driver) · burst 5/s · sustained 5/10s · Zod validate
    │
-═══ FIRE-AND-FORGET ═══════════════════════════ void … .catch · not awaited ═══
-   •  emit Socket.IO  location:update → room vehicle:{id}
-   •  geofence enter/exit detection
-   •  off-route check → debounced route.optimize enqueue
+   ├─▶ resolve vehicleId
+   │      GET fleet:driver-active-vehicle:{driverId}                 ← Redis
+   │      └ miss → Postgres lookup → re-prime cache (fire-and-forget)
+   │
+   ├─▶ anomaly check
+   │      GET veh:{id}:last (+ :ts) → turf distance / Δt             ← Redis
+   │      └ vs ANOMALY_TELEPORT_M_PER_S   →   drop | flag
+   │
+   ├─▶ INGEST_LUA — one atomic Redis round-trip
+   │      SET :last/:ts   (only if clean & newer)
+   │      RPUSH :buffer → LTRIM to cap → INCR :counter
+   │      └ counter == FLUSH_THRESHOLD → return snapshot + DEL buffer
+   │
+   └─▶ if flushed → enqueue tracking.flush   (BullMQ — returns instantly)
+   │
+   ▼
+   ●━━ 200 OK · response returns to the driver here ━━━━━━━━━━━━━━━━━━━━━━━
+   │
+━━━ ② FIRE-AND-FORGET ━━━━━━━━━━━━━━━━━━━━━━━ void … .catch() · not awaited ━━━
+   │
+   ├─▶ emit Socket.IO  location:update  → room vehicle:{id}
+   ├─▶ geofence enter / exit detection
+   └─▶ off-route check → debounced route.optimize enqueue
 
-═══ WORKER  (async, off the request path) ══════════════════════════════
-   tracking.flush → applyPingsToVehicle("live")
-        → INSERT vehicle_location_history   (batch of FLUSH_THRESHOLD)
-        → UPSERT vehicle_current_location   (only if recordedAt newer)
+━━━ ③ WORKER ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ async · off the request path ━━━
+   │
+   └─▶ tracking.flush → applyPingsToVehicle("live")
+          → INSERT vehicle_location_history   (batch of FLUSH_THRESHOLD)
+          → UPSERT vehicle_current_location   (only if recordedAt newer)
 ```
 
 Offline batch (`POST /api/v1/tracking/retry`) takes up to 240 strictly-monotonic pings per request (each with a UUID `clientId`), groups them by the historic assignment window each ping fell into (using `findDriverAssignmentsOverlappingWindow`), and enqueues `tracking.retry_flush` per-vehicle. Writes use `ON CONFLICT (vehicle_id, client_id) DO NOTHING` so reuploading is idempotent.
@@ -329,16 +338,18 @@ The planner models the network as a **directed weighted graph**:
 - Edges are auto-built by the `hub.connections.rebuild` job calling the **Mapbox Matrix** API (≤ 25 coords/call); `manual_override` edges survive rebuilds.
 
 ```
-  vertices = hubs        edges = hub_connections (directed, weight = typical_duration_s)
+  vertices = hubs        edges = hub_connections  (directed, weight = typical_duration_s)
 
-        ┌───────────┐   1200s    ┌────────────┐    900s
-        │ A · Mumbai│ ─────────▶ │ B · Nashik │ ─────────┐
-        └─────┬─────┘            └────────────┘          │
-              │ 1500s                                     ▼
-              ▼                                    ┌────────────┐
-        ┌───────────┐         1100s                │ D · Delhi  │
-        │ C · Surat │ ───────────────────────────▶ └────────────┘
-        └───────────┘
+                  1200s                  900s
+   ┌───────────┐ ────────▶ ┌───────────┐ ────────▶ ┌───────────┐
+   │ A  Mumbai │           │ B  Nashik │           │ D  Delhi  │
+   └─────┬─────┘           └───────────┘           └─────▲─────┘
+         │                                               │
+         │ 1500s                                  1100s  │
+         ▼                                               │
+   ┌───────────┐                                         │
+   │ C  Surat  │ ────────────────────────────────────────┘
+   └───────────┘
 ```
 
 **How a path is calculated** (at shipment creation, `from_pincode → to_pincode`):
@@ -351,7 +362,7 @@ The planner models the network as a **directed weighted graph**:
 For the graph above, planning **A → D** compares:
 
 ```
-  A → B → D = 1200 + 900  = 2100s   ✅ chosen (lowest typical_duration_s)
+  A → B → D = 1200 + 900  = 2100s   ◀── chosen (lowest typical_duration_s)
   A → C → D = 1500 + 1100 = 2600s
 ```
 
