@@ -304,7 +304,7 @@ Routes themselves are now strictly **hub-to-hub trips**. The `POST /routes` body
 ## Operational notes
 
 - **Graceful shutdown** — implemented for both processes (SIGTERM, SIGINT, uncaughtException, unhandledRejection). The worker stops accepting new HTTP traffic, waits for in-flight jobs (lockDuration 60s on the tracking flush worker), then closes Redis and DB pools.
-- **Correlation IDs** — take `x-correlation-id` from incoming requests if it matches `^[A-Za-z0-9_-]{1,64}$`, otherwise generate a UUID. Propagated to logs, audit rows, and job envelopes.
+  - **Correlation IDs** — take `x-correlation-id` from incoming requests if it matches `^[A-Za-z0-9_-]{1,64}$`, otherwise generate a UUID. Propagated to logs, audit rows, and job envelopes.
 - **Logging** — Winston JSON in production, colourized in dev. Every request emits one structured line on `finish` with method, URL, status, duration, correlation ID, and user ID.
 - **Health** — `/readyz` returns 503 when DB or Redis is down; wire this into your load balancer and your Kubernetes readiness probe.
 - **Worker readiness** — a worker is "ready" only when DB + Redis are reachable AND every individual BullMQ worker `isRunning()`. During shutdown the same endpoint returns 503 with `shuttingDown:true`, so a rolling restart drains traffic cleanly.
